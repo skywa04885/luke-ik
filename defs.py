@@ -1,1 +1,2 @@
 VERSION: str = '0.0.1'
+FLOAT_EPSILON: float = 0.00001

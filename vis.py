@@ -240,9 +240,6 @@ def draw_chain(start: bone_vector, end: bone_vector) -> None:
     glColor3f(1.0, 0.5, 0.5)
     draw_dot(end_effector)
 
-    # Draws the end effector axis.
-    draw_axis(end_effector)
-
 
 def camera() -> None:
     # Sets the matrix mode to the projection matrix, and loads the identity matrix.

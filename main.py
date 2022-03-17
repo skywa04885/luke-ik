@@ -2,11 +2,15 @@
 Luke's Inverse Kinematics - Demo for automated kitchen, Rien Dumore.
 """
 
-import numpy as np
-
-from bone_vector import bone_vector
-from forward import fk
-from helpers import rad, generalize_unit
+import pygame
+from chain import chain_init
+from window import Window
 
 if __name__ == '__main__':
-    pass
+    # Initializes the IK Chain.
+    chain_init()
+
+    # Creates the window.
+    window: Window = Window()
+    window.run()
+
