@@ -1,13 +1,22 @@
 import math
 import sys
+from time import time
+from tkinter import E
 import numpy as np
 import pygame
 from enum import Enum
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from bone_vector import bone_vector
-from defs import FLOAT_EPSILON
+from defs import DEFAULT_IK_TARGET, FLOAT_EPSILON, MOTION_MODE_ARC__END_ANGLE, MOTION_MODE_ARC__ORIENTATION, MOTION_MODE_ARC__POSITION, MOTION_MODE_ARC__PRESCALAR, MOTION_MODE_ARC__RADIUS, MOTION_MODE_ARC__START_ANGLE
 from chain import chain_bottom, chain_top
+from helpers import rad, rotation
+from inverse import ik
+
+
+class MotionMode(Enum):
+    Manual = 0
+    Arc = 1
 
 
 class JoystickButton(Enum):
@@ -52,8 +61,6 @@ class Window:
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-        # Gets the controller.
-
         # Initializes the camera state.
         self.camera_rotation = [45, -45, 0]
         self.camera_position = [0, 0, -160]
@@ -65,9 +72,19 @@ class Window:
         self.down_key_pressed = False
 
         # Initializes the IK state.
-        self.ik_target: np.array = np.array([0.0, 40.0, 0.0])
+        self.ik_target: np.array = DEFAULT_IK_TARGET
+        self.ik_had_previous_large_error = False
+        self.motion_mode = MotionMode.Arc
 
         # Initializes the joystick stuff.
+        self.joystick_left_arrow_pressed = False
+        self.joystick_right_arrow_pressed = False
+        self.joystick_up_arrow_pressed = False
+        self.joystick_down_arrow_pressed = False
+        self.joystick_back_left_pressed = False
+        self.joystick_back_right_pressed = False
+        self.joystick_left_stick_pressed = False
+        self.joystick_right_stick_pressed = False
         self.axis_data = {
             0: 0.0,
             1: 0.0,
@@ -77,11 +94,81 @@ class Window:
             5: 0.0,
         }
 
+        # Arc motion options.
+        self.arc_start: float = MOTION_MODE_ARC__START_ANGLE
+        self.arc_end: float = MOTION_MODE_ARC__END_ANGLE
+        self.arc_radius: float = MOTION_MODE_ARC__RADIUS
+        self.arc_position: np.array = MOTION_MODE_ARC__POSITION
+        self.arc_orientation: list[float] = MOTION_MODE_ARC__ORIENTATION
+
     def handle_joystick_button_down(self, button: JoystickButton) -> None:
-        pass
+        if button == JoystickButton.Cross:
+            # Resets the chain.
+            chain_bottom.reset_chain()
+
+            # Recomputes.
+            self.solve_ik_target()
+            return
+        elif button == JoystickButton.Circle:
+            # Sets the default target.
+            self.update_ik_target(DEFAULT_IK_TARGET)
+            return
+        elif button == JoystickButton.ArrowLeft:
+            self.joystick_left_arrow_pressed = True
+            return
+        elif button == JoystickButton.ArrowRight:
+            self.joystick_right_arrow_pressed = True
+            return
+        elif button == JoystickButton.ArrowUp:
+            self.joystick_up_arrow_pressed = True
+            return
+        elif button == JoystickButton.ArrowDown:
+            self.joystick_down_arrow_pressed = True
+            return
+        elif button == JoystickButton.LeftBack:
+            self.joystick_back_left_pressed = True
+            return
+        elif button == JoystickButton.RightBack:
+            self.joystick_back_right_pressed = True
+            return
+        elif button == JoystickButton.Options:
+            if self.motion_mode == MotionMode.Manual:
+                self.motion_mode = MotionMode.Arc
+            elif self.motion_mode == MotionMode.Arc:
+                self.motion_mode = MotionMode.Manual
+            print(f'Changed motion mode to {self.motion_mode}')
+        elif button == JoystickButton.LeftJoyStick:
+            self.joystick_left_stick_pressed = True
+            return
+        elif button == JoystickButton.RightJoyStick:
+            self.joystick_right_stick_pressed = True
+            return
 
     def handle_joystick_button_up(self, button: JoystickButton) -> None:
-        pass
+        if button == JoystickButton.ArrowLeft:
+            self.joystick_left_arrow_pressed = False
+            return
+        elif button == JoystickButton.ArrowRight:
+            self.joystick_right_arrow_pressed = False
+            return
+        elif button == JoystickButton.ArrowUp:
+            self.joystick_up_arrow_pressed = False
+            return
+        elif button == JoystickButton.ArrowDown:
+            self.joystick_down_arrow_pressed = False
+            return
+        elif button == JoystickButton.LeftBack:
+            self.joystick_back_left_pressed = False
+            return
+        elif button == JoystickButton.RightBack:
+            self.joystick_back_right_pressed = False
+            return
+        elif button == JoystickButton.LeftJoyStick:
+            self.joystick_left_stick_pressed = False
+            return
+        elif button == JoystickButton.RightJoyStick:
+            self.joystick_right_stick_pressed = False
+            return
 
     def handle_key_down(self, event: pygame.event) -> None:
         # Arrow Keys
@@ -145,6 +232,23 @@ class Window:
     def set_color(self, r: float, g: float, b: float, a=1.0) -> None:
         glColor4f(r, g, b, a)
 
+    def draw_arc(self, position: np.array = np.array([ 0.0, 0.0, 0.0 ]), transform: np.array = np.identity(3), radius: float = 1.0, width: float = 5.0, start: float = 0.0, end: float = 2 * math.pi) -> None:
+        # Sets the line width.
+        glLineWidth(width)
+
+        # Starts drawing the lines.
+        glBegin(GL_LINES)
+        steps: int = int((abs(end - start) / math.pi) * 30)
+        for i in range(0, steps):
+            angle: float = start + ((end - start) / float(steps)) * i
+            vertex_x, vertex_y = math.cos(angle) * radius, math.sin(angle) * radius
+            vertex_position = np.matmul(
+                transform, np.array([vertex_x, vertex_y, 0.0]))
+            vertex_position = np.add(vertex_position, position)
+            glVertex3f(vertex_position[0], vertex_position[1], vertex_position[2])
+
+        glEnd()
+
     def draw_chain(self, start: bone_vector, end: bone_vector) -> None:
         # Initialize stuff.
         end_effector: np.array = np.array([0.0, 0.0, 0.0])
@@ -180,7 +284,7 @@ class Window:
         # Draws the lines.
         for i in range(0, len(lines) - 1):
             self.set_color(1.0, 1.0, 1.0)
-            self.draw_dot(lines[i + 1], 5)
+            self.draw_dot(lines[i], 5)
             self.set_color(1.0, 0.5, 1.0)
             self.draw_line(lines[i], lines[i + 1], dotted=True)
 
@@ -188,9 +292,8 @@ class Window:
         self.set_color(1.0, 0.5, 0.5)
         self.draw_line([0, 0, 0], end_effector, dotted=True)
 
-        # Draws the end effector dot.
-        self.set_color(1.0, 0.5, 0.5)
-        self.draw_dot(end_effector)
+        # Dras the axis.
+        self.draw_axis(position=end_effector, size=5.0)
 
     def draw_dot(self, position: np.array = np.array([0.0, 0.0, 0.0]), size: float = 20) -> None:
         # Sets the point size.
@@ -220,18 +323,18 @@ class Window:
         if dotted:
             glDisable(GL_LINE_STIPPLE)
 
-    def draw_axis(self, position: np.array = np.array([0, 0, 0]), size: float = 5.0) -> None:
+    def draw_axis(self, position: np.array = np.array([0, 0, 0]), size: float = 5.0, width: float = 2.0) -> None:
         # X
         self.set_color(1.0, 0.0, 0.0, 0.7)
-        self.draw_line(position, np.add(position, [size, 0.0, 0.0]), 4)
+        self.draw_line(position, np.add(position, [size, 0.0, 0.0]), width)
 
         # Y
         self.set_color(0.0, 1.0, 0.0, 0.7)
-        self.draw_line(position, np.add(position, [0.0, size, 0.0]), 4)
+        self.draw_line(position, np.add(position, [0.0, size, 0.0]), width)
 
         # Z
         self.set_color(0.0, 0.0, 1.0, 0.7)
-        self.draw_line(position, np.add(position, [0.0, 0.0, size]), 4)
+        self.draw_line(position, np.add(position, [0.0, 0.0, size]), width)
 
     def render_camera(self) -> None:
         # Sets the matrix mode to the projection matrix, and loads the identity matrix.
@@ -253,46 +356,145 @@ class Window:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
     def render(self) -> None:
+        # Clears the screen.
         self.clear_screen()
+
+        # Renders the camera.
         self.render_camera()
-        self.draw_axis(size=10)
+        self.draw_axis(size=30)
 
         # Draws the IK Target.
         self.set_color(0.2, 1.0, 0.2, 0.9)
         self.draw_dot(position=self.ik_target, size=10)
         self.draw_chain(chain_bottom, chain_top)
 
+        # Renders the arc.
+        if self.motion_mode == MotionMode.Arc:
+            self.set_color(1.0, 1.0, 1.0, 0.7)
+            self.draw_arc(
+                position=self.arc_position,
+                transform=rotation.xyz(self.arc_orientation[0], self.arc_orientation[1], self.arc_orientation[2]),
+                radius=self.arc_radius,
+                start=self.arc_start,
+                end=self.arc_end
+            )
+
     def update_ik_target(self, new_target: np.array) -> None:
         # Sets the new target.
         self.ik_target = new_target
 
+        # Solves the target.
+        self.solve_ik_target()
+
+    def solve_ik_target(self) -> None:
         # Performs the IK Solving.
+        error: float = ik(start_bone=chain_bottom, end_bone=chain_top, target=self.ik_target)
+        print(f'Solved new IK target with error: {error}')
+
+        # Vibrates if the error is large
+        if error == None or error > 1.0:
+            if not self.ik_had_previous_large_error:
+                self.ik_had_previous_large_error = True
+                # self.joystick.rumble(60.0, 70.0, 100)
+        else:
+            self.ik_had_previous_large_error = False
 
     def run(self) -> None:
+        # Initial target solve.
+        self.solve_ik_target()
+
+        # Event loop.
         while True:
             # Handles the events.
             self.handle_events()
 
-            # Does something with the keys.
-            if self.left_key_pressed:
+            # Performs camera rotations
+            if self.left_key_pressed or self.joystick_left_arrow_pressed:
                 self.camera_rotation[1] += 0.8
-            if self.right_key_pressed:
+            if self.right_key_pressed or self.joystick_right_arrow_pressed:
                 self.camera_rotation[1] -= 0.8
-            if self.up_key_pressed:
+            if self.up_key_pressed or self.joystick_up_arrow_pressed:
                 self.camera_rotation[0] += 0.8
-            if self.down_key_pressed:
+            if self.down_key_pressed or self.joystick_down_arrow_pressed:
                 self.camera_rotation[0] -= 0.8
+            
+            # Zooms in and out.
+            if self.joystick_back_right_pressed:
+                self.camera_position[2] += 0.5
+            if self.joystick_back_left_pressed:
+                self.camera_position[2] -= 0.5
 
-            # Does something with the axis data.
-            if abs(self.axis_data[0]) > 0.1:
-                self.update_ik_target(
-                    np.add(self.ik_target, [self.axis_data[0] / 4.0, 0.0, 0.0]))
-            if abs(self.axis_data[1]) > 0.1:
-                self.update_ik_target(
-                    np.add(self.ik_target, [0.0, 0.0, self.axis_data[1] / 4.0]))
-            if abs(self.axis_data[3]) > 0.1:
-                self.update_ik_target(
-                    np.add(self.ik_target, [0.0, self.axis_data[3] / 4.0, 0.0]))
+            # Checks how to Interpret the inputs.
+            if self.motion_mode == MotionMode.Manual:
+                # Does something with the axis data.
+                if abs(self.axis_data[0]) > 0.1:
+                    self.update_ik_target(
+                        np.add(self.ik_target, [self.axis_data[0] / 4.0, 0.0, 0.0]))
+                if abs(self.axis_data[1]) > 0.1:
+                    self.update_ik_target(
+                        np.add(self.ik_target, [0.0, 0.0, self.axis_data[1] / 4.0]))
+                if abs(self.axis_data[3]) > 0.1:
+                    self.update_ik_target(
+                        np.add(self.ik_target, [0.0, - self.axis_data[3] / 4.0, 0.0]))
+            elif self.motion_mode == MotionMode.Arc:
+                arc_modified: bool = False
+
+                # Checks if we need to modify shit.
+                if self.joystick_left_stick_pressed:
+                    if abs(self.axis_data[0]) > 0.1:
+                        self.arc_orientation[1] += self.axis_data[0] / 40.0
+                        arc_modified = True
+                    if abs(self.axis_data[1]) > 0.1:
+                        self.arc_orientation[0] += self.axis_data[1] / 40.0
+                        arc_modified = True
+                else:
+                    if abs(self.axis_data[0]) > 0.1:
+                        self.arc_position = np.add(self.arc_position, [self.axis_data[0] / 4.0, 0.0, 0.0])
+                        arc_modified = True
+                    if abs(self.axis_data[1]) > 0.1:
+                        self.arc_position = np.add(self.arc_position, [0.0, 0.0, self.axis_data[1] / 4.0])
+                        arc_modified = True
+                
+                if self.joystick_right_stick_pressed:
+                    if abs(self.axis_data[2]) > 0.1:
+                        self.arc_radius += self.axis_data[2]
+                        arc_modified = True
+                else:
+                    if abs(self.axis_data[3]) > 0.1:
+                        self.arc_position = np.add(self.arc_position, [0.0, - self.axis_data[3] / 4.0, 0.0])
+                        arc_modified = True
+
+                if self.axis_data[4] > 0.4:
+                    self.arc_start -= rad(self.axis_data[4] / 2.0)
+                    if self.arc_start < rad(0.0):
+                        self.arc_start = rad(0.0)
+                    arc_modified = True
+                
+                if self.axis_data[5] > 0.4:
+                    self.arc_start += rad(self.axis_data[5] / 2.0)
+                    if self.arc_start > rad(360.0):
+                        self.arc_start = rad(360.0)
+                    arc_modified = True
+
+                if not arc_modified:
+                    # Clamps the time between two values.
+                    delta: float = abs(self.arc_end - self.arc_start)
+                    t: float = time() / ((MOTION_MODE_ARC__PRESCALAR / (math.pi * 2)) * delta)
+                    clamped: float = t % 2 * delta
+                    
+                    # Determines the angle, moves forward and backwards.
+                    angle: float = 0.0
+                    if clamped <= delta:
+                        angle = self.arc_start + clamped
+                    elif clamped > delta:
+                        angle = self.arc_end - clamped - self.arc_start
+
+                    # Performs the computation.
+                    x: float = math.cos(angle) * self.arc_radius
+                    y: float = math.sin(angle) * self.arc_radius
+                    target: np.array = np.matmul(rotation.xyz(self.arc_orientation[0], self.arc_orientation[1], self.arc_orientation[2]), np.array([ x, y, 0.0 ]))
+                    target = np.add(self.arc_position, target)
+                    self.update_ik_target(target)
 
             # Renders.
             self.render()

@@ -23,27 +23,32 @@ def generalize_unit(value: float, unit: str):
     return value * multiplier
 
 class rotation:
-    # def x(theta: float) -> np.array:
-    #     return np.array([
-    #         [,,],
-    #         [,,],
-    #         [,,]
-    #     ])
+    def x(theta: float) -> np.array:
+        return np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, math.cos(theta), -math.sin(theta)],
+            [0.0, math.sin(theta), math.cos(theta)]
+        ])
     
-    # def y(theta: float) -> np.array:
-    #     return np.array([
-    #         [,,],
-    #         [,,],
-    #         [,,]
-    #     ])
+    def y(theta: float) -> np.array:
+        return np.array([
+            [math.cos(theta), 0.0, math.sin(theta)],
+            [0.0, 1.0, 0.0],
+            [-math.sin(theta), 0.0, math.cos(theta)]
+        ])
     
-    # def z(theta: float) -> np.array:
-    #     return np.array([
-    #         [,,],
-    #         [,,],
-    #         [,,]
-    #     ])
+    def z(theta: float) -> np.array:
+        return np.array([
+            [math.cos(theta), -math.sin(theta), 0.0],
+            [math.sin(theta), math.cos(theta), 0.0],
+            [0.0, 0.0, 10]
+        ])
 
+    def xyz(x_theta: float, y_theta: float, z_theta: float) -> np.array:
+        x_val: np.array = rotation.x(x_theta)
+        y_val: np.array = rotation.y(y_theta)
+        z_val: np.array = rotation.z(z_theta)
+        return np.matmul(np.matmul(x_val, y_val), z_val)
 
     def along_axis(u: tuple[float, float, float], theta: float) -> np.array:
         return np.array([
