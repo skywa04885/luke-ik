@@ -12,6 +12,7 @@ from defs import DEFAULT_IK_TARGET, FLOAT_EPSILON, MOTION_MODE_ARC__END_ANGLE, M
 from chain import chain_bottom, chain_top
 from helpers import rad, rotation
 from inverse import ik
+from phy import Phy
 
 
 class MotionMode(Enum):
@@ -39,9 +40,10 @@ class JoystickButton(Enum):
 
 
 class Window:
-    def __init__(self, width: int = 512, height: int = 512) -> None:
+    def __init__(self, width: int = 512, height: int = 512, phy: Phy or None = None) -> None:
         self.width = width
         self.height = height
+        self.phy = phy
 
         # Initializes pygame, with the joystick.
         pygame.init()
@@ -398,6 +400,10 @@ class Window:
                 # self.joystick.rumble(60.0, 70.0, 100)
         else:
             self.ik_had_previous_large_error = False
+        
+        # Updates the Phy.
+        if self.phy is not None:
+            self.phy.write_chain(chain_bottom)
 
     def run(self) -> None:
         # Initial target solve.
