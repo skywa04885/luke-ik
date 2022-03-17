@@ -8,9 +8,9 @@ from bone_vector import bone_vector
 from helpers import rad
 
 STEPPER_CONVERSION_DICT = [
-    200.0 * 1600.0,    
-    -200.0 * 1600.0,
-    200.0 * 400.0
+    49.0 * 1600.0,    
+    -49.0 * 1600.0,
+    49.0 * 400.0
 ]
 
 class Phy:
