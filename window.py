@@ -1,7 +1,6 @@
 import math
 import sys
 from time import time
-from tkinter import E
 import numpy as np
 import pygame
 from enum import Enum
@@ -50,8 +49,10 @@ class Window:
         pygame.joystick.init()
 
         # Gets the joystick.
-        self.joystick = pygame.joystick.Joystick(0)
-        self.joystick.init()
+        self.joystick: pygame.joystick.Joystick or None = None
+        if pygame.joystick.get_count() > 0:
+            self.joystick = pygame.joystick.Joystick(0)
+            self.joystick.init()
 
         # Sets the display mode.
         pygame.display.set_mode(
@@ -390,14 +391,17 @@ class Window:
 
     def solve_ik_target(self) -> None:
         # Performs the IK Solving.
+        start_time = time()
         error: float = ik(start_bone=chain_bottom, end_bone=chain_top, target=self.ik_target)
-        print(f'Solved new IK target with error: {error}')
+        end_time = time()
+        print(f'Solved new IK target with error: {error} in {end_time - start_time}')
 
         # Vibrates if the error is large
         if error == None or error > 1.0:
             if not self.ik_had_previous_large_error:
                 self.ik_had_previous_large_error = True
-                # self.joystick.rumble(60.0, 70.0, 100)
+                if self.joystick is not None:
+                    self.joystick.rumble(60.0, 70.0, 100)
         else:
             self.ik_had_previous_large_error = False
         

@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from bone_vector import bone_vector
 from forward import fk
@@ -43,7 +44,7 @@ def ik(start_bone: bone_vector, end_bone: bone_vector, target: np.array, max_it:
             if error < epsilon:
                 return error
 
-            eta = error / 100
+            eta = (error / 200) * math.pi
 
             # Goes to the next joint.
             current = current.next
